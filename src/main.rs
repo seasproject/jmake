@@ -1,32 +1,72 @@
-use std::{env, process, str::FromStr};
+use std::{fs::File, path::PathBuf, process};
 
-use clap::{Args, Parser, Subcommand};
-use tokio::fs;
+use clap::{Parser, Subcommand};
+use flate2::{write::GzEncoder, Compression};
+use tokio::fs::{self};
+use tracing::info;
+
+mod format;
+use format::*;
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt::init();
+
     let cli = Cli::parse();
 
     match cli.command {
         Command::Hello => {
-            println!("Hello!");
+            info!("Hello!");
         }
-        Command::Make(args) => {
-            let current_dir = env::current_dir().expect("failed to load current directory");
+        Command::Make => {
+            // Search for common package types
+            // Cargo project
+            if PathBuf::from("Cargo.toml").exists() {
+                info!("Detected Cargo project");
 
-            match args.format {
-                ProjectType::Rust => {
-                    // Expect a Cargo.toml
-                    let cargo_toml = current_dir.join("Cargo.toml");
-                    if !cargo_toml.exists() {
-                        panic!("this rust project does not contain a Cargo.toml file");
-                    }
+                // Load Cargo.toml
+                let path = PathBuf::from("Cargo.toml");
+                let cargo_package: cargo::CargoProject =
+                    toml::from_str(fs::read_to_string(path).await.unwrap().as_str())
+                        .expect("Failed to parse Cargo.toml");
 
-                    // Run `cargo build --release`
-                    let status = process::Command::new("cargo")
-                        .args(["build", "--release"])
-                        .status()
-                        .expect("Failed to run `cargo build --release`");
+                // Build package
+                info!("Building package");
+                let status = process::Command::new("cargo")
+                    .args(["build", "--release"])
+                    .status()
+                    .expect("Failed to execute cargo");
+
+                if !status.success() {
+                    panic!("failed to build cargo project");
+                }
+
+                let mut bin_paths: Vec<PathBuf> = vec![];
+
+                let exe_path = PathBuf::from("target/release/")
+                    .join(format!("{}.exe", cargo_package.package.name));
+                if exe_path.exists() {
+                    bin_paths.push(exe_path);
+                }
+
+                let lib_path = PathBuf::from("target/release/")
+                    .join(format!("lib{}.rlib", cargo_package.package.name));
+                if lib_path.exists() {
+                    bin_paths.push(lib_path);
+                }
+
+                let bin_folder = PathBuf::from("bin");
+                info!("Compressing!");
+                let tar_gz = File::create(format!("{}.jellyfish", cargo_package.package.name))
+                    .expect("Failed to create archive");
+                let enc = GzEncoder::new(tar_gz, Compression::best());
+                let mut tar = tar::Builder::new(enc);
+                for bin in &bin_paths {
+                    tar.append_file(
+                        bin_folder.join(bin.file_name().unwrap()),
+                        &mut File::open(bin).unwrap(),
+                    )
+                    .unwrap();
                 }
             }
         }
@@ -42,27 +82,5 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     Hello,
-    Make(MakeArgs),
-}
-
-#[derive(Args)]
-struct MakeArgs {
-    #[clap(short = 't', long = "type")]
-    format: ProjectType,
-}
-
-#[derive(Debug)]
-enum ProjectType {
-    Rust,
-}
-
-impl FromStr for ProjectType {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "Rust" => Ok(ProjectType::Rust),
-            _ => Err(String::from("Invalid project type")),
-        }
-    }
+    Make,
 }
