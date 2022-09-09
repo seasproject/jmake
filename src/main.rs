@@ -3,10 +3,10 @@ use std::{fs::File, path::PathBuf, process};
 use clap::{Args, Parser, Subcommand};
 use flate2::{write::GzEncoder, Compression};
 use tokio::fs::{self};
-use tracing::info;
+use tracing::{error, info};
 
 mod format;
-use format::*;
+use format::{install::InstallFormat, out::PackageType, *};
 
 #[tokio::main]
 async fn main() {
@@ -19,10 +19,10 @@ async fn main() {
             info!("Hello!");
         }
         Command::Make => {
-            match info()
+            let (install_format, format) = info()
                 .await
-                .expect("Failed to find information about package")
-            {
+                .expect("Failed to find information about package");
+            match format {
                 Format::Cargo(cargo_package) => {
                     // Build package
                     info!("Building package");
@@ -62,32 +62,56 @@ async fn main() {
                         )
                         .unwrap();
                     }
+
+                    if let InstallFormat::Wharf = install_format {
+                        for rope in glob::glob("*.rope").unwrap() {
+                            let rope = rope.unwrap();
+                            tar.append_file(
+                                &rope.file_name().unwrap(),
+                                &mut File::open(&rope).unwrap(),
+                            )
+                            .unwrap();
+                        }
+                    }
+                }
+                Format::None => {
+                    error!("Unknown project type");
+                    panic!()
                 }
             }
         }
         Command::Info(args) => {
-            let compiled: String;
-            match info().await.expect("Failed to load package info") {
-                Format::Cargo(cargo_project) => {
-                    let out: format::out::Package = format::out::Package {
-                        name: cargo_project.package.name.clone(),
-                        friendly_name: cargo_project.package.name,
-                        version: cargo_project.package.version,
-                        install: format::out::InstallInfo {
-                            url: args
-                                .download_url
-                                .unwrap_or("<INSERT DOWNLOAD URL>".to_string()),
-                            type_: format::out::PackageType::JellyFish,
-                        },
-                    };
-                    compiled = toml::to_string(&out).expect("Failed to compile Toml");
+            let (install_format, format) = info().await.expect("Failed to load package info");
+            let mut package: format::out::Package = match format {
+                Format::Cargo(cargo_project) => format::out::Package {
+                    name: cargo_project.package.name.clone(),
+                    friendly_name: cargo_project.package.name,
+                    version: cargo_project.package.version,
+                    install: format::out::InstallInfo {
+                        url: args
+                            .download_url
+                            .unwrap_or("<INSERT DOWNLOAD URL>".to_string()),
+                        type_: format::out::PackageType::JellyFish,
+                    },
+                },
+                Format::None => {
+                    error!("Invalid format");
+                    panic!()
+                }
+            };
+
+            match install_format {
+                InstallFormat::JellyFish => {}
+                InstallFormat::Wharf => {
+                    package.install.type_ = PackageType::Wharf;
                 }
             }
+
             if args.out.is_none() {
-                println!("{}", compiled);
+                println!("{}", toml::to_string(&package).unwrap());
             } else {
                 let out_file = args.out.unwrap();
-                fs::write(out_file, compiled)
+                fs::write(out_file, toml::to_string(&package).unwrap())
                     .await
                     .expect("Failed to write to output file");
             }
@@ -95,8 +119,10 @@ async fn main() {
     };
 }
 
-async fn info() -> Result<Format, failure::Error> {
+async fn info() -> Result<(InstallFormat, Format), failure::Error> {
     // Search for common package types
+    let mut format: Format = Format::None;
+    let mut install_format: InstallFormat = InstallFormat::JellyFish;
 
     // Cargo project
     if PathBuf::from("Cargo.toml").exists() {
@@ -108,10 +134,17 @@ async fn info() -> Result<Format, failure::Error> {
             toml::from_str(fs::read_to_string(path).await?.as_str())
                 .expect("Failed to parse Cargo.toml");
 
-        return Ok(Format::Cargo(cargo_package));
+        format = Format::Cargo(cargo_package);
     }
 
-    Err(failure::err_msg("Unknown or invalid project type"))
+    // Wharf
+    if PathBuf::from("build.rope").exists() {
+        info!("Detected Wharf ship");
+
+        install_format = InstallFormat::Wharf;
+    }
+
+    Ok((install_format, format))
 }
 
 #[derive(Parser)]

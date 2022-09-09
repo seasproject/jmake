@@ -17,4 +17,5 @@ pub struct InstallInfo {
 #[derive(Serialize)]
 pub enum PackageType {
     JellyFish,
+    Wharf,
 }
