@@ -82,15 +82,37 @@ async fn main() {
         }
         Command::Info(args) => {
             let (install_format, format) = info().await.expect("Failed to load package info");
+            let previous: format::out::Package = toml::from_str(
+                fs::read_to_string("package.toml")
+                    .await
+                    .unwrap_or_default()
+                    .as_str(),
+            )
+            .unwrap_or(format::out::Package {
+                name: "".to_string(),
+                friendly_name: "".to_string(),
+                version: "".to_string(),
+                install: format::out::InstallInfo {
+                    url: "".to_string(),
+                    type_: PackageType::JellyFish,
+                },
+            });
             let mut package: format::out::Package = match format {
                 Format::Cargo(cargo_project) => format::out::Package {
                     name: cargo_project.package.name.clone(),
-                    friendly_name: cargo_project.package.name,
-                    version: cargo_project.package.version,
+                    friendly_name: if previous.friendly_name != "".to_string() {
+                        previous.friendly_name
+                    } else {
+                        cargo_project.package.name.clone()
+                    },
+                    version: cargo_project.package.version.clone(),
                     install: format::out::InstallInfo {
                         url: args
                             .download_url
-                            .unwrap_or("<INSERT DOWNLOAD URL>".to_string()),
+                            .unwrap_or("<INSERT DOWNLOAD URL>".to_string())
+                            .replace("${version}", &cargo_project.package.version)
+                            .replace("${name}", &cargo_project.package.name)
+                            .replace("${friendly_name}", &cargo_project.package.name),
                         type_: format::out::PackageType::JellyFish,
                     },
                 },

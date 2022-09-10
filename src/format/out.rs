@@ -1,6 +1,6 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Package {
     pub name: String,
     pub friendly_name: String,
@@ -8,13 +8,13 @@ pub struct Package {
     pub install: InstallInfo,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct InstallInfo {
     pub url: String,
     pub type_: PackageType,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub enum PackageType {
     JellyFish,
     Wharf,
