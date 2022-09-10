@@ -98,24 +98,30 @@ async fn main() {
                 },
             });
             let mut package: format::out::Package = match format {
-                Format::Cargo(cargo_project) => format::out::Package {
-                    name: cargo_project.package.name.clone(),
-                    friendly_name: if previous.friendly_name != "".to_string() {
+                Format::Cargo(cargo_project) => {
+                    let friendly_name = if previous.friendly_name != "".to_string() {
                         previous.friendly_name
                     } else {
                         cargo_project.package.name.clone()
-                    },
-                    version: cargo_project.package.version.clone(),
-                    install: format::out::InstallInfo {
-                        url: args
-                            .download_url
-                            .unwrap_or("<INSERT DOWNLOAD URL>".to_string())
-                            .replace("${version}", &cargo_project.package.version)
-                            .replace("${name}", &cargo_project.package.name)
-                            .replace("${friendly_name}", &cargo_project.package.name),
-                        type_: format::out::PackageType::JellyFish,
-                    },
-                },
+                    };
+
+                    let package = format::out::Package {
+                        name: cargo_project.package.name.clone(),
+                        friendly_name: friendly_name.clone(),
+                        version: cargo_project.package.version.clone(),
+                        install: format::out::InstallInfo {
+                            url: args
+                                .download_url
+                                .unwrap_or("<INSERT DOWNLOAD URL>".to_string())
+                                .replace("${version}", &cargo_project.package.version)
+                                .replace("${name}", &cargo_project.package.name)
+                                .replace("${friendly_name}", &friendly_name),
+                            type_: format::out::PackageType::JellyFish,
+                        },
+                    };
+
+                    package
+                }
                 Format::None => {
                     error!("Invalid format");
                     panic!()
